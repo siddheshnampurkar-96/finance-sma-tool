@@ -138,6 +138,14 @@ def run(
                     "close": float(history.loc[date, "Close"]),
                     "vix_high_stress": stress_today,
                     "sector_above_sma200": sector_above,
+                    "dca_action": signal.dca_action,
+                    "dca_multiplier": signal.dca_multiplier,
+                    "sma_200": signal.inputs.get("sma_200", float("nan")),
+                    "atr_14": signal.inputs.get("atr_14", float("nan")),
+                    "sma200_slope_20": signal.inputs.get("sma200_slope_20", float("nan")),
+                    "consec_below_lower_band": signal.inputs.get(
+                        "consec_below_lower_band", float("nan")
+                    ),
                 }
             )
 
@@ -235,3 +243,95 @@ def cagr(equity: pd.Series) -> float:
     if years <= 0:
         return float("nan")
     return float(equity.iloc[-1] ** (1 / years) - 1)
+
+
+# ---------- DCA simulation (round-5 product output) ------------------------
+
+
+@dataclass(frozen=True)
+class DCAFlow:
+    """One DCA scenario: per-day contribution amount + outcomes.
+
+    daily_amount: baseline $ contributed every trading day before
+        signal-based adjustments.
+    enable_bulk: if True, days flagged ``bulk`` get ``daily_amount *
+        dca_multiplier`` instead (the extra is "additive" — from a
+        separate reserve, not borrowed from other days).
+    enable_pause: if True, days flagged ``pause`` get $0.
+    """
+
+    daily_amount: float
+    enable_bulk: bool = True
+    enable_pause: bool = True
+
+
+def simulate_dca(
+    history: pd.DataFrame,
+    signals: pd.DataFrame,
+    flow: DCAFlow,
+) -> pd.DataFrame:
+    """Run a daily DCA simulation through ``history`` using ``signals``.
+
+    Each day we deposit a contribution (regular / bulk / paused), buy
+    fractional shares at that day's Close, and mark the running totals.
+
+    Returns a DataFrame indexed by date with columns:
+        contribution, action, shares_bought, total_shares,
+        total_invested, portfolio_value, cost_basis
+    """
+    sig_aligned = signals.set_index("date").reindex(history.index)
+    action = sig_aligned["dca_action"].fillna("regular")
+    multiplier = sig_aligned["dca_multiplier"].fillna(1.0)
+
+    rows = []
+    total_shares = 0.0
+    total_invested = 0.0
+    for date, row in history.iterrows():
+        act = action.loc[date]
+        mult = multiplier.loc[date]
+        if act == "pause" and flow.enable_pause:
+            contribution = 0.0
+        elif act == "bulk" and flow.enable_bulk:
+            contribution = flow.daily_amount * float(mult)
+        else:
+            contribution = flow.daily_amount
+        close = float(row["Close"])
+        shares_bought = contribution / close if close > 0 else 0.0
+        total_shares += shares_bought
+        total_invested += contribution
+        portfolio_value = total_shares * close
+        cost_basis = total_invested / total_shares if total_shares > 0 else float("nan")
+        rows.append(
+            {
+                "date": date,
+                "action": act,
+                "contribution": contribution,
+                "shares_bought": shares_bought,
+                "total_shares": total_shares,
+                "total_invested": total_invested,
+                "portfolio_value": portfolio_value,
+                "cost_basis": cost_basis,
+            }
+        )
+    return pd.DataFrame(rows).set_index("date")
+
+
+def dca_metrics(simulation: pd.DataFrame) -> dict:
+    """Roll up a single DCA run into headline numbers."""
+    if simulation.empty:
+        return {}
+    final = simulation.iloc[-1]
+    pv_curve = simulation["portfolio_value"]
+    return {
+        "total_invested": float(final["total_invested"]),
+        "total_shares": float(final["total_shares"]),
+        "final_value": float(final["portfolio_value"]),
+        "profit": float(final["portfolio_value"] - final["total_invested"]),
+        "profit_per_dollar": float(
+            (final["portfolio_value"] - final["total_invested"]) / final["total_invested"]
+        )
+        if final["total_invested"] > 0
+        else float("nan"),
+        "avg_cost_basis": float(final["cost_basis"]),
+        "max_drawdown_portfolio_value": max_drawdown(pv_curve.where(pv_curve > 0).dropna()),
+    }

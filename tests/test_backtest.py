@@ -121,6 +121,104 @@ def test_summary_orders_buckets_canonically():
     assert result.summary["label"].tolist() == expected
 
 
+def test_simulate_dca_invests_daily_baseline():
+    """Vanilla DCA: every trading day deposits the baseline, no signal-based adjustments."""
+    dates = pd.date_range("2024-01-01", periods=5, freq="B")
+    history = pd.DataFrame(
+        {"Open": 100.0, "High": 100.0, "Low": 100.0, "Close": 100.0, "Volume": 1.0},
+        index=dates,
+    )
+    empty_signals = pd.DataFrame({"date": [], "dca_action": [], "dca_multiplier": []})
+    sim = backtest.simulate_dca(
+        history,
+        empty_signals,
+        backtest.DCAFlow(daily_amount=10.0),
+    )
+    # 5 days × $10 = $50 invested, 0.5 shares total at $100 each.
+    assert sim["total_invested"].iloc[-1] == pytest.approx(50.0)
+    assert sim["total_shares"].iloc[-1] == pytest.approx(0.5)
+    assert sim["portfolio_value"].iloc[-1] == pytest.approx(50.0)
+
+
+def test_simulate_dca_bulk_day_deploys_extra():
+    """On a bulk day with multiplier 3x, contribution should be 3x baseline (additive)."""
+    dates = pd.date_range("2024-01-01", periods=3, freq="B")
+    history = pd.DataFrame(
+        {"Open": 100.0, "High": 100.0, "Low": 100.0, "Close": 100.0, "Volume": 1.0},
+        index=dates,
+    )
+    signals = pd.DataFrame(
+        {
+            "date": dates,
+            "dca_action": ["regular", "bulk", "regular"],
+            "dca_multiplier": [1.0, 3.0, 1.0],
+        }
+    )
+    sim = backtest.simulate_dca(
+        history, signals, backtest.DCAFlow(daily_amount=10.0)
+    )
+    # Day 1: $10. Day 2: $30 (bulk 3x). Day 3: $10. Total $50.
+    assert sim["contribution"].tolist() == [10.0, 30.0, 10.0]
+    assert sim["total_invested"].iloc[-1] == pytest.approx(50.0)
+
+
+def test_simulate_dca_pause_day_invests_zero():
+    dates = pd.date_range("2024-01-01", periods=3, freq="B")
+    history = pd.DataFrame(
+        {"Open": 100.0, "High": 100.0, "Low": 100.0, "Close": 100.0, "Volume": 1.0},
+        index=dates,
+    )
+    signals = pd.DataFrame(
+        {
+            "date": dates,
+            "dca_action": ["regular", "pause", "regular"],
+            "dca_multiplier": [1.0, 0.0, 1.0],
+        }
+    )
+    sim = backtest.simulate_dca(
+        history, signals, backtest.DCAFlow(daily_amount=10.0)
+    )
+    assert sim["contribution"].tolist() == [10.0, 0.0, 10.0]
+    assert sim["total_invested"].iloc[-1] == pytest.approx(20.0)
+
+
+def test_simulate_dca_pause_disabled_falls_back_to_regular():
+    dates = pd.date_range("2024-01-01", periods=2, freq="B")
+    history = pd.DataFrame(
+        {"Open": 100.0, "High": 100.0, "Low": 100.0, "Close": 100.0, "Volume": 1.0},
+        index=dates,
+    )
+    signals = pd.DataFrame(
+        {"date": dates, "dca_action": ["pause", "pause"], "dca_multiplier": [0.0, 0.0]}
+    )
+    sim = backtest.simulate_dca(
+        history, signals, backtest.DCAFlow(daily_amount=10.0, enable_pause=False)
+    )
+    assert sim["contribution"].tolist() == [10.0, 10.0]
+
+
+def test_dca_metrics_computes_profit_and_basis():
+    """Buy 1 share at $100, then price rises to $200: profit = $100, basis = $100."""
+    simulation = pd.DataFrame(
+        {
+            "action": ["regular", "regular"],
+            "contribution": [100.0, 0.0],
+            "shares_bought": [1.0, 0.0],
+            "total_shares": [1.0, 1.0],
+            "total_invested": [100.0, 100.0],
+            "portfolio_value": [100.0, 200.0],
+            "cost_basis": [100.0, 100.0],
+        },
+        index=pd.date_range("2024-01-01", periods=2, freq="B"),
+    )
+    metrics = backtest.dca_metrics(simulation)
+    assert metrics["total_invested"] == pytest.approx(100.0)
+    assert metrics["final_value"] == pytest.approx(200.0)
+    assert metrics["profit"] == pytest.approx(100.0)
+    assert metrics["profit_per_dollar"] == pytest.approx(1.0)
+    assert metrics["avg_cost_basis"] == pytest.approx(100.0)
+
+
 def test_max_drawdown_and_cagr_basic():
     dates = pd.date_range("2020-01-01", periods=4, freq="D")
     equity = pd.Series([1.0, 1.2, 0.8, 1.5], index=dates)

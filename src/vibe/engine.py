@@ -54,6 +54,8 @@ class Signal:
     score: float
     reasons: list[Reason]
     inputs: dict[str, float] = field(default_factory=dict)
+    dca_action: str = "regular"  # "pause" | "regular" | "bulk"
+    dca_multiplier: float = 1.0
 
 
 class AssetEngine:
@@ -86,6 +88,14 @@ class AssetEngine:
     # Bucket thresholds
     STRONG_THRESHOLD = 0.70
     MILD_THRESHOLD = 0.40
+
+    # DCA parameters (round-5 lock).
+    # Bulk multiplier = clamp(BASE + SLOPE * dip_atr, BASE, CAP) where
+    # dip_atr = (SMA_200 - Close) / ATR_14 (positive when below SMA).
+    DCA_BULK_BASE = 1.5
+    DCA_BULK_SLOPE = 2.0
+    DCA_BULK_CAP = 5.0
+    DCA_MIN_DIP_ATR = 0.0  # any dip in healthy trend qualifies; cap below
 
     MIN_HISTORY = SMA_WINDOW + SLOPE_WINDOW  # 220 rows
 
@@ -270,6 +280,20 @@ class AssetEngine:
         score = float(np.clip(score, -1.0, 1.0))
         label = cls._bucket(score)
 
+        # DCA action (round-5 product output, independent of the 5-bucket label)
+        dca_action, dca_multiplier, dca_reason = cls._compute_dca(
+            close=close,
+            sma200=sma200_today,
+            atr14=atr_today,
+            sma200_slope=sma200_slope_today,
+            obv_slope_norm=obv_slope_norm_today,
+            sector_above=inputs.sector_above_sma200,
+            consec_below_lower_band=consec_below,
+            n_bear=n_bear,
+        )
+        if dca_reason is not None:
+            reasons.append(dca_reason)
+
         return Signal(
             label=label,
             score=score,
@@ -290,7 +314,82 @@ class AssetEngine:
                 "vix_high_stress": float(macro.vix_high_stress),
                 "sector_above_sma200": float(inputs.sector_above_sma200),
             },
+            dca_action=dca_action,
+            dca_multiplier=dca_multiplier,
         )
+
+    @classmethod
+    def _compute_dca(
+        cls,
+        *,
+        close: float,
+        sma200: float,
+        atr14: float,
+        sma200_slope: float,
+        obv_slope_norm: float,
+        sector_above: bool,
+        consec_below_lower_band: int,
+        n_bear: int,
+    ) -> tuple[str, float, Optional[Reason]]:
+        """Decide pause / regular / bulk-buy for today's DCA contribution.
+
+        Precedence: pause beats bulk beats regular. The pause gate is
+        intentionally conservative (three structural failures must align)
+        to avoid skipping contributions at panic lows that historically
+        precede recoveries.
+        """
+        is_bear_confirmed = consec_below_lower_band >= n_bear
+
+        if is_bear_confirmed and sma200_slope < 0 and not sector_above:
+            return (
+                "pause",
+                0.0,
+                Reason(
+                    rule="dca_pause",
+                    contribution=0.0,
+                    detail=(
+                        "Pause DCA: confirmed bear regime + falling SMA-200 "
+                        "+ broken sector (3-of-3 structural failures)."
+                    ),
+                ),
+            )
+
+        dip_atr = (sma200 - close) / atr14 if atr14 > 0 else 0.0
+        # NOTE: bear regime is intentionally NOT a bulk-buy veto.
+        # Sharp corrections within a bull market (e.g., March 2020) WILL
+        # trigger bear-regime confirmation, and historically those are
+        # the highest-value bulk-buy moments. The slope+ and sector+
+        # gates do the structural filtering; bear regime co-occurring
+        # with a healthy trend is a feature, not a bug.
+        # NOTE: OBV slope is also not gated. In a real dip price is down
+        # by definition, so OBV will mechanically be down too — the
+        # bearish-divergence concern (price UP + OBV DOWN) is moot.
+        if (
+            dip_atr > cls.DCA_MIN_DIP_ATR
+            and sma200_slope > 0
+            and sector_above
+        ):
+            multiplier = float(
+                np.clip(
+                    cls.DCA_BULK_BASE + cls.DCA_BULK_SLOPE * dip_atr,
+                    cls.DCA_BULK_BASE,
+                    cls.DCA_BULK_CAP,
+                )
+            )
+            return (
+                "bulk",
+                multiplier,
+                Reason(
+                    rule="dca_bulk_buy",
+                    contribution=multiplier,
+                    detail=(
+                        f"Bulk-buy {multiplier:.2f}x: dip {dip_atr:.2f} ATR below "
+                        f"SMA-200 (slope+, sector+)."
+                    ),
+                ),
+            )
+
+        return "regular", 1.0, None
 
     @classmethod
     def _bucket(cls, score: float) -> str:

@@ -249,3 +249,126 @@ def test_score_always_clamped_to_unit_range():
     inputs = AssetInputs(history=history, sector_above_sma200=True)
     signal = AssetEngine.compute(inputs, calm_macro())
     assert -1.0 <= signal.score <= 1.0
+
+
+# ---------- DCA action (round-5 product output) ----------------------------
+
+
+def _dip_in_healthy_trend(pullback_low: float = 99.0):
+    """Build a 220-day series that ends BELOW SMA-200 in an uptrend.
+
+    Layout (designed so SMA-200 slope is positive and today's close is
+    below SMA-200):
+      - days 0..150: flat at 100 (raises SMA-200's "old" anchor)
+      - days 150..200: linear uptrend to 110 (lifts SMA + makes slope+)
+      - days 200..220: pullback to ``pullback_low`` (dip below SMA)
+    """
+    closes = np.concatenate(
+        [
+            np.full(150, 100.0),
+            np.linspace(100.0, 110.0, 50),
+            np.linspace(110.0, pullback_low, 20),
+        ]
+    )
+    return closes
+
+
+def test_dca_bulk_fires_on_dip_in_healthy_trend():
+    """All criteria satisfied: dip + slope+ + sector+ + OBV+ + no earnings + no bear."""
+    closes = _dip_in_healthy_trend(pullback_low=99.0)
+    history = make_history(closes)
+    inputs = AssetInputs(history=history, sector_above_sma200=True)
+    signal = AssetEngine.compute(inputs, calm_macro())
+    assert signal.dca_action == "bulk"
+    assert signal.dca_multiplier >= AssetEngine.DCA_BULK_BASE
+
+
+def test_dca_bulk_multiplier_scales_with_dip_depth():
+    """Deeper dip → larger multiplier (up to the cap)."""
+    shallow = _dip_in_healthy_trend(pullback_low=101.0)
+    deep = _dip_in_healthy_trend(pullback_low=95.0)
+    s_shallow = AssetEngine.compute(
+        AssetInputs(history=make_history(shallow), sector_above_sma200=True),
+        calm_macro(),
+    )
+    s_deep = AssetEngine.compute(
+        AssetInputs(history=make_history(deep), sector_above_sma200=True),
+        calm_macro(),
+    )
+    assert s_shallow.dca_action == "bulk"
+    assert s_deep.dca_action == "bulk"
+    assert s_deep.dca_multiplier > s_shallow.dca_multiplier
+
+
+def test_dca_bulk_caps_at_max_multiplier():
+    closes = _dip_in_healthy_trend(pullback_low=80.0)
+    history = make_history(closes)
+    inputs = AssetInputs(history=history, sector_above_sma200=True)
+    signal = AssetEngine.compute(inputs, calm_macro())
+    if signal.dca_action == "bulk":
+        assert signal.dca_multiplier == pytest.approx(AssetEngine.DCA_BULK_CAP)
+
+
+def test_dca_bulk_does_not_fire_when_sma_slope_falling():
+    """Dip with SMA-200 already falling — not a healthy-trend dip, no bulk."""
+    closes = np.concatenate([np.linspace(150, 100, 200), np.full(20, 95.0)])
+    history = make_history(closes)
+    inputs = AssetInputs(history=history, sector_above_sma200=True)
+    signal = AssetEngine.compute(inputs, calm_macro())
+    assert signal.dca_action != "bulk"
+
+
+def test_dca_bulk_does_not_fire_when_sector_broken():
+    closes = _dip_in_healthy_trend(pullback_low=99.0)
+    history = make_history(closes)
+    inputs = AssetInputs(history=history, sector_above_sma200=False)
+    signal = AssetEngine.compute(inputs, calm_macro())
+    assert signal.dca_action != "bulk"
+
+
+def test_dca_pause_requires_three_structural_failures():
+    """Pause fires only when bear regime + falling SMA + broken sector all align.
+
+    Building a sustained breakdown: a long downtrend followed by a deep
+    push below the lower band so bear regime confirms, SMA slope is
+    negative, AND sector is set to broken.
+    """
+    closes = np.concatenate([np.linspace(150, 105, 200), np.full(20, 90.0)])
+    history = make_history(closes)
+    inputs = AssetInputs(history=history, sector_above_sma200=False)
+    signal = AssetEngine.compute(inputs, calm_macro())
+    assert signal.dca_action == "pause"
+    assert signal.dca_multiplier == 0.0
+
+
+def test_dca_pause_does_not_fire_with_only_two_failures():
+    """Bear regime + falling SMA-200 BUT sector is healthy → still regular."""
+    closes = np.concatenate([np.linspace(150, 105, 200), np.full(20, 90.0)])
+    history = make_history(closes)
+    inputs = AssetInputs(history=history, sector_above_sma200=True)
+    signal = AssetEngine.compute(inputs, calm_macro())
+    assert signal.dca_action != "pause"
+
+
+def test_dca_default_is_regular_in_flat_market(flat_history):
+    inputs = AssetInputs(history=flat_history, sector_above_sma200=True)
+    signal = AssetEngine.compute(inputs, calm_macro())
+    assert signal.dca_action == "regular"
+    assert signal.dca_multiplier == 1.0
+
+
+def test_dca_during_earnings_keeps_regular_pace():
+    """Pre-earnings hard override returns Hold AND regular DCA.
+
+    Round-5 lock: earnings uncertainty is not a buy signal but also not
+    a reason to skip the routine DCA contribution.
+    """
+    closes = _dip_in_healthy_trend(pullback_low=99.0)
+    history = make_history(closes)
+    inputs = AssetInputs(
+        history=history, sector_above_sma200=True, days_to_earnings=2
+    )
+    signal = AssetEngine.compute(inputs, calm_macro())
+    assert signal.label == "Hold"
+    assert signal.dca_action == "regular"
+    assert signal.dca_multiplier == 1.0
