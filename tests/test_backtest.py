@@ -18,12 +18,12 @@ def test_no_lookahead_in_signal_generation():
     would massively skew the signal if leaked. The signal generated on
     the LAST day of the calm pre-crash period must still look bullish.
     """
-    n = 240
-    calm = np.full(220, 100.0)
+    n = 280
+    calm = np.full(260, 100.0)
     crash = np.linspace(100, 50, 20)
     closes = np.concatenate([calm, crash])
     history = make_history(closes)
-    last_calm_date = history.index[219]  # final day of the flat 100s
+    last_calm_date = history.index[259]  # final day of the flat 100s
 
     vix = _make_vix(history.index, 15.0)
     result = backtest.run(
@@ -43,13 +43,13 @@ def test_no_lookahead_in_signal_generation():
 
 def test_forward_return_aligns_to_future_close():
     """fwd_h column should equal (Close[t+h] - Close[t]) / Close[t]."""
-    n = 230
+    n = 270
     closes = np.linspace(100.0, 130.0, n)
     history = make_history(closes)
     vix = _make_vix(history.index, 15.0)
 
-    eval_start = history.index[220]
-    eval_end = history.index[221]
+    eval_start = history.index[260]
+    eval_end = history.index[261]
     result = backtest.run(
         asset_histories={"X": history},
         sector_proxies={"X": history},
@@ -72,9 +72,9 @@ def test_equity_curve_position_lags_signal_by_one_day():
     Build a history where exactly one day produces a Buy signal; verify
     that position_long is False on that day and True on the next.
     """
-    # Construct a 230-day path that goes flat then jumps so the engine
-    # produces a Buy on day 220 and beyond.
-    closes = np.concatenate([np.full(220, 100.0), np.linspace(100, 130, 10)])
+    # Construct a 270-day path that goes flat then jumps so the engine
+    # produces a Buy on day 260 and beyond.
+    closes = np.concatenate([np.full(260, 100.0), np.linspace(100, 130, 10)])
     history = make_history(closes)
     vix = _make_vix(history.index, 15.0)
 
@@ -82,7 +82,7 @@ def test_equity_curve_position_lags_signal_by_one_day():
         asset_histories={"X": history},
         sector_proxies={"X": history},
         vix_close=vix,
-        start=history.index[220],
+        start=history.index[260],
         end=history.index[-1],
     )
 
@@ -107,14 +107,14 @@ def test_summary_orders_buckets_canonically():
     """Summary frame must list buckets Strong Buy → Strong Sell regardless
     of which actually appeared in the data, so downstream consumers can
     rely on the row ordering."""
-    closes = np.linspace(100.0, 130.0, 230)
+    closes = np.linspace(100.0, 130.0, 270)
     history = make_history(closes)
     vix = _make_vix(history.index, 15.0)
     result = backtest.run(
         asset_histories={"X": history},
         sector_proxies={"X": history},
         vix_close=vix,
-        start=history.index[220],
+        start=history.index[260],
         end=history.index[-1],
     )
     expected = ["Strong Buy", "Mild Buy", "Hold", "Mild Sell", "Strong Sell"]

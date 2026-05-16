@@ -46,7 +46,7 @@ The engine evaluates one asset on one day and returns a `Signal { label, score, 
 
 **DCA action** (round-5 primary product output):
 - `dca_action ∈ {"pause", "regular", "bulk"}` + `dca_multiplier ∈ [0.0, 5.0]`.
-- **Bulk** fires when ALL of: Close ≤ SMA-200, SMA-200 slope > 0, sector_above_sma200, no earnings blackout. Multiplier = `clamp(1.5 + 2.0 * dip_atr, 1.5, 5.0)` where `dip_atr = (SMA_200 - Close) / ATR_14`.
+- **Bulk** fires when ALL of: Close ≤ SMA-200, SMA-200 slope > 0 AND slope-momentum intact (slope today ≥ 0.5 × slope 20d ago when prior slope was positive), sector_above_sma200, no earnings blackout. Multiplier = `clamp(1.5 + 2.0 * dip_atr, 1.5, 5.0)` where `dip_atr = (SMA_200 - Close) / ATR_14`.
 - **Pause** fires only when 3-of-3 structural failures align: confirmed bear regime + falling SMA-200 + sector below its SMA-200.
 - Earnings window keeps DCA at regular pace (no bulk, no pause).
 - For broad-market index/ETF holdings (no separate sector), pass `sector_above_sma200=True` (the engine's caller decides).
@@ -56,7 +56,7 @@ Every rule that fires is recorded in `reasons[]` so the UI can show *why* a sign
 ## Conventions
 
 - Indicators are pure functions over a pandas DataFrame; NaNs in warm-up periods are preserved.
-- The engine assumes at least 220 rows of history (SMA-200 + 20-day slope).
+- The engine assumes at least 240 rows of history (SMA-200 + 20-day slope + 20-day slope-momentum lookback).
 - Tests pin each rule's contribution to the locked spec — any drift in the formula breaks the corresponding test, which is intentional. Update tests and the locked plan together if a contribution value changes.
 
 ## Plan reference

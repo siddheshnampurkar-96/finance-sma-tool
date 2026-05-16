@@ -227,7 +227,7 @@ def main() -> None:
     rows, _ = run_one("SP500", sp500, None, vix, sp_start)
     all_rows.extend(rows)
 
-    aapl_start = aapl.index.min() + pd.Timedelta(days=320)
+    aapl_start = aapl.index.min() + pd.Timedelta(days=350)  # need 240 trading days warmup
     rows, _ = run_one("AAPL", aapl, sp500, vix, aapl_start)
     all_rows.extend(rows)
 

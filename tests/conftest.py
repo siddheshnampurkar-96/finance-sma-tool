@@ -39,5 +39,8 @@ def make_history(closes, volumes=None, high_offset=0.5, low_offset=0.5):
 
 @pytest.fixture
 def flat_history():
-    """220 days of price=100, volume=1M. SMA-200 ≈ 100, ATR ≈ 1, slopes ≈ 0."""
-    return make_history(np.full(220, 100.0))
+    """260 days of price=100, volume=1M. SMA-200 ≈ 100, ATR ≈ 1, slopes ≈ 0.
+
+    Sized for the round-5 long-trend window (60d), which dominates the
+    earlier 20d slope warmup."""
+    return make_history(np.full(260, 100.0))

@@ -30,7 +30,7 @@ def test_pre_earnings_forces_hold_regardless_of_setup():
     This test would fail if anyone reintroduces a soft-suppress variant
     or removes the override entirely.
     """
-    closes = np.linspace(50, 150, 220)  # screaming uptrend
+    closes = np.linspace(50, 150, 260)  # screaming uptrend
     history = make_history(closes)
     inputs = AssetInputs(
         history=history,
@@ -49,7 +49,7 @@ def test_post_earnings_does_not_override():
     A symmetric hard-override would set score to 0 for days_since_earnings <= 3
     and break this test.
     """
-    closes = np.linspace(50, 150, 220)
+    closes = np.linspace(50, 150, 260)
     history = make_history(closes)
     inputs = AssetInputs(
         history=history,
@@ -64,7 +64,7 @@ def test_post_earnings_does_not_override():
 
 
 def test_strong_buy_on_steady_uptrend():
-    closes = np.linspace(50, 150, 220)
+    closes = np.linspace(50, 150, 260)
     history = make_history(closes)
     inputs = AssetInputs(history=history, sector_above_sma200=True)
     signal = AssetEngine.compute(inputs, calm_macro())
@@ -79,7 +79,7 @@ def test_strong_sell_on_breakdown_after_long_flat():
     with base at -1.0 and negative slope it should land Strong Sell.
     """
     closes = np.concatenate(
-        [np.full(200, 100.0), np.linspace(100.0, 50.0, 20, endpoint=False)]
+        [np.full(240, 100.0), np.linspace(100.0, 50.0, 20, endpoint=False)]
     )
     history = make_history(closes)
     inputs = AssetInputs(history=history, sector_above_sma200=True)
@@ -99,7 +99,7 @@ def test_hold_on_flat_history(flat_history):
 
 
 def test_base_score_clamps_to_one_for_far_above_sma():
-    closes = np.concatenate([np.full(200, 100.0), np.full(20, 200.0)])
+    closes = np.concatenate([np.full(240, 100.0), np.full(20, 200.0)])
     history = make_history(closes)
     inputs = AssetInputs(history=history, sector_above_sma200=True)
     signal = AssetEngine.compute(inputs, calm_macro())
@@ -112,14 +112,14 @@ def test_sector_amplifies_when_aligned_with_base_direction():
     Healthy sector + bearish base → modifier is -0.15 (idiosyncratic
     failure amplification per A3 in the critique).
     """
-    closes = np.concatenate([np.full(200, 100.0), np.full(20, 102.0)])
+    closes = np.concatenate([np.full(240, 100.0), np.full(20, 102.0)])
     history = make_history(closes)
     bullish = AssetEngine.compute(
         AssetInputs(history=history, sector_above_sma200=True), calm_macro()
     )
     assert reasons_by_rule(bullish)["sector_health"].contribution == pytest.approx(0.15)
 
-    closes_down = np.concatenate([np.full(200, 100.0), np.full(20, 98.0)])
+    closes_down = np.concatenate([np.full(240, 100.0), np.full(20, 98.0)])
     bearish_with_healthy_sector = AssetEngine.compute(
         AssetInputs(history=make_history(closes_down), sector_above_sma200=True),
         calm_macro(),
@@ -128,7 +128,7 @@ def test_sector_amplifies_when_aligned_with_base_direction():
 
 
 def test_sector_dampens_when_sector_broken():
-    closes_down = np.concatenate([np.full(200, 100.0), np.full(20, 98.0)])
+    closes_down = np.concatenate([np.full(240, 100.0), np.full(20, 98.0)])
     broken = AssetEngine.compute(
         AssetInputs(history=make_history(closes_down), sector_above_sma200=False),
         calm_macro(),
@@ -144,7 +144,7 @@ def test_obv_bearish_divergence_subtracts_quarter_point():
     in the first half. Net OBV slope over 20 days is negative while
     price slope is positive.
     """
-    n = 220
+    n = 260
     closes = np.full(n, 100.0)
     closes[-21:] = np.linspace(100.0, 102.0, 21)  # mild uptrend over last 20 days
     # Build OBV negative by faking heavy down-volume days within the window
@@ -162,8 +162,8 @@ def test_obv_bearish_divergence_subtracts_quarter_point():
 
 def test_bear_regime_fires_at_n5_in_calm_market():
     """5 consecutive closes below the lower band triggers bear regime in calm VIX."""
-    # 200 flat days at 100, then 6 days well below the lower band (~99.35).
-    closes = np.concatenate([np.full(200, 100.0), np.full(20, 95.0)])
+    # 240 flat days at 100, then 20 days well below the lower band (~99.35).
+    closes = np.concatenate([np.full(240, 100.0), np.full(20, 95.0)])
     history = make_history(closes)
     inputs = AssetInputs(history=history, sector_above_sma200=True)
     signal = AssetEngine.compute(inputs, calm_macro())
@@ -178,12 +178,8 @@ def test_vix_high_stress_widens_bear_regime_window_to_seven():
     This is the key behavioral difference of the high-VIX regime per
     the round-4 lock (along with the wider buffer multiplier k).
     """
-    # 200 flat + 6 days at 95 (well below band)
-    closes = np.concatenate([np.full(200, 100.0), np.full(6, 95.0)])
-    # Pad to MIN_HISTORY=220
-    closes = np.concatenate([closes, np.full(220 - len(closes), 95.0)])
-    # We want EXACTLY ~6 consecutive trailing days below band. Reset earlier closes to 100.
-    closes = np.concatenate([np.full(214, 100.0), np.full(6, 95.0)])
+    # 254 flat + 6 days at 95 (well below band). Total 260 = MIN_HISTORY.
+    closes = np.concatenate([np.full(254, 100.0), np.full(6, 95.0)])
     history = make_history(closes)
     inputs = AssetInputs(history=history, sector_above_sma200=True)
 
@@ -201,7 +197,7 @@ def test_vix_high_stress_widens_bear_regime_window_to_seven():
 def test_vix_high_stress_widens_buffer_multiplier():
     """k widens from 0.65 to 1.0 in high stress, so the same close
     produces a smaller base magnitude."""
-    closes = np.concatenate([np.full(200, 100.0), np.full(20, 100.5)])
+    closes = np.concatenate([np.full(240, 100.0), np.full(20, 100.5)])
     history = make_history(closes)
     inputs = AssetInputs(history=history, sector_above_sma200=True)
     calm_base = reasons_by_rule(AssetEngine.compute(inputs, calm_macro()))["base"].contribution
@@ -211,7 +207,7 @@ def test_vix_high_stress_widens_buffer_multiplier():
 
 
 def test_sma_slope_positive_contributes_plus_ten():
-    closes = np.linspace(80, 120, 220)
+    closes = np.linspace(80, 120, 260)
     history = make_history(closes)
     inputs = AssetInputs(history=history, sector_above_sma200=True)
     signal = AssetEngine.compute(inputs, calm_macro())
@@ -221,7 +217,7 @@ def test_sma_slope_positive_contributes_plus_ten():
 
 
 def test_sma_slope_negative_contributes_minus_ten():
-    closes = np.linspace(120, 80, 220)
+    closes = np.linspace(120, 80, 260)
     history = make_history(closes)
     inputs = AssetInputs(history=history, sector_above_sma200=False)
     signal = AssetEngine.compute(inputs, calm_macro())
@@ -235,7 +231,7 @@ def test_sma_slope_negative_contributes_minus_ten():
 
 def test_insufficient_history_raises():
     history = make_history(np.full(100, 100.0))
-    with pytest.raises(ValueError, match="at least 220"):
+    with pytest.raises(ValueError, match="at least 240"):
         AssetEngine.compute(
             AssetInputs(history=history, sector_above_sma200=True),
             calm_macro(),
@@ -244,7 +240,7 @@ def test_insufficient_history_raises():
 
 def test_score_always_clamped_to_unit_range():
     """Even with every bearish rule firing the score should not exceed -1.0."""
-    closes = np.concatenate([np.full(200, 100.0), np.linspace(100.0, 30.0, 20, endpoint=False)])
+    closes = np.concatenate([np.full(240, 100.0), np.linspace(100.0, 30.0, 20, endpoint=False)])
     history = make_history(closes)
     inputs = AssetInputs(history=history, sector_above_sma200=True)
     signal = AssetEngine.compute(inputs, calm_macro())
@@ -254,20 +250,21 @@ def test_score_always_clamped_to_unit_range():
 # ---------- DCA action (round-5 product output) ----------------------------
 
 
-def _dip_in_healthy_trend(pullback_low: float = 99.0):
-    """Build a 220-day series that ends BELOW SMA-200 in an uptrend.
+def _dip_in_healthy_trend(pullback_low: float = 100.0):
+    """Build a 240-day series that ends BELOW SMA-200 in an uptrend.
 
-    Layout (designed so SMA-200 slope is positive and today's close is
-    below SMA-200):
-      - days 0..150: flat at 100 (raises SMA-200's "old" anchor)
-      - days 150..200: linear uptrend to 110 (lifts SMA + makes slope+)
-      - days 200..220: pullback to ``pullback_low`` (dip below SMA)
+    Layout (designed so SMA-200 slope is positive and roughly stable
+    20 days ago vs today, so the slope-momentum gate also passes):
+      - days 0..150: flat at 100 (anchor)
+      - days 150..230: linear uptrend to 120 (long enough that slope_20
+        is steady-state; both today's and 20-day-prior slope are similar)
+      - days 230..240: short pullback to ``pullback_low`` (recent dip)
     """
     closes = np.concatenate(
         [
             np.full(150, 100.0),
-            np.linspace(100.0, 110.0, 50),
-            np.linspace(110.0, pullback_low, 20),
+            np.linspace(100.0, 120.0, 80),
+            np.linspace(120.0, pullback_low, 10),
         ]
     )
     return closes
@@ -285,8 +282,10 @@ def test_dca_bulk_fires_on_dip_in_healthy_trend():
 
 def test_dca_bulk_multiplier_scales_with_dip_depth():
     """Deeper dip → larger multiplier (up to the cap)."""
-    shallow = _dip_in_healthy_trend(pullback_low=101.0)
-    deep = _dip_in_healthy_trend(pullback_low=95.0)
+    # ATR is large enough in the new fixture (10 days of 120→pullback)
+    # that "shallow" and "deep" actually produce different multipliers.
+    shallow = _dip_in_healthy_trend(pullback_low=103.0)
+    deep = _dip_in_healthy_trend(pullback_low=90.0)
     s_shallow = AssetEngine.compute(
         AssetInputs(history=make_history(shallow), sector_above_sma200=True),
         calm_macro(),
@@ -311,11 +310,69 @@ def test_dca_bulk_caps_at_max_multiplier():
 
 def test_dca_bulk_does_not_fire_when_sma_slope_falling():
     """Dip with SMA-200 already falling — not a healthy-trend dip, no bulk."""
-    closes = np.concatenate([np.linspace(150, 100, 200), np.full(20, 95.0)])
+    closes = np.concatenate([np.linspace(150, 100, 240), np.full(20, 95.0)])
     history = make_history(closes)
     inputs = AssetInputs(history=history, sector_above_sma200=True)
     signal = AssetEngine.compute(inputs, calm_macro())
     assert signal.dca_action != "bulk"
+
+
+def test_dca_bulk_blocks_when_slope_momentum_collapses():
+    """Slope-momentum guard: if slope_today < 0.5 × slope_20d_ago,
+    no bulk-buy (the trend is rolling over).
+
+    Calls _compute_dca directly with a "dip but slope collapsing"
+    snapshot so the assertion pins the gate behaviour rather than
+    relying on a synthetic history that hits the gate by accident.
+    """
+    action_collapse, mult_collapse, _ = AssetEngine._compute_dca(
+        close=98.0,
+        sma200=100.0,
+        atr14=1.0,
+        sma200_slope=0.4,  # still positive but...
+        sma200_slope_prev=1.0,  # ...collapsed from 1.0 (ratio 0.4 < 0.5)
+        obv_slope_norm=0.5,
+        sector_above=True,
+        consec_below_lower_band=0,
+        n_bear=5,
+    )
+    assert action_collapse == "regular"
+    assert mult_collapse == 1.0
+
+
+def test_dca_bulk_fires_when_slope_momentum_strong_or_recovering():
+    """Dual sanity: same dip with intact slope momentum DOES fire,
+    AND a recovery-from-negative (prev_slope <= 0) also fires.
+    """
+    # Strong slope momentum: 0.9 today vs 1.0 prev (ratio 0.9 > 0.5).
+    a, m, _ = AssetEngine._compute_dca(
+        close=98.0,
+        sma200=100.0,
+        atr14=1.0,
+        sma200_slope=0.9,
+        sma200_slope_prev=1.0,
+        obv_slope_norm=0.5,
+        sector_above=True,
+        consec_below_lower_band=0,
+        n_bear=5,
+    )
+    assert a == "bulk" and m >= AssetEngine.DCA_BULK_BASE
+
+    # Recovery: slope_prev was negative, now positive (ratio meaningless;
+    # gate should pass because going from down-trend to up-trend is the
+    # *opposite* of a rollover).
+    a, m, _ = AssetEngine._compute_dca(
+        close=98.0,
+        sma200=100.0,
+        atr14=1.0,
+        sma200_slope=0.5,
+        sma200_slope_prev=-0.5,
+        obv_slope_norm=0.5,
+        sector_above=True,
+        consec_below_lower_band=0,
+        n_bear=5,
+    )
+    assert a == "bulk" and m >= AssetEngine.DCA_BULK_BASE
 
 
 def test_dca_bulk_does_not_fire_when_sector_broken():
@@ -333,7 +390,7 @@ def test_dca_pause_requires_three_structural_failures():
     push below the lower band so bear regime confirms, SMA slope is
     negative, AND sector is set to broken.
     """
-    closes = np.concatenate([np.linspace(150, 105, 200), np.full(20, 90.0)])
+    closes = np.concatenate([np.linspace(150, 105, 240), np.full(20, 90.0)])
     history = make_history(closes)
     inputs = AssetInputs(history=history, sector_above_sma200=False)
     signal = AssetEngine.compute(inputs, calm_macro())
@@ -343,7 +400,7 @@ def test_dca_pause_requires_three_structural_failures():
 
 def test_dca_pause_does_not_fire_with_only_two_failures():
     """Bear regime + falling SMA-200 BUT sector is healthy → still regular."""
-    closes = np.concatenate([np.linspace(150, 105, 200), np.full(20, 90.0)])
+    closes = np.concatenate([np.linspace(150, 105, 240), np.full(20, 90.0)])
     history = make_history(closes)
     inputs = AssetInputs(history=history, sector_above_sma200=True)
     signal = AssetEngine.compute(inputs, calm_macro())
